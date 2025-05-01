@@ -1,16 +1,22 @@
 import os
 import json
+import numpy as np
 from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 import cv2
 import face_utils
 from datetime import datetime
 from dotenv import load_dotenv
 from geopy.distance import geodesic
+import logging
 
 load_dotenv()
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = os.getenv('SECRET_KEY', 'default-secret-key')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load allowed locations from JSON file
 def load_locations():
@@ -18,37 +24,82 @@ def load_locations():
         with open('allowedLocations.json', 'r') as f:
             data = json.load(f)
             return data.get('locations', {})
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"Error loading locations: {str(e)}")
         return {}
 
 ALLOWED_LOCATIONS = load_locations()
 
-# Initialize face recognition
-real_time_pred = face_utils.RealTimePrediction()
-staff_df = face_utils.retrive_data(name='staff:register')
+# Initialize face recognition with reduced memory footprint
+try:
+    real_time_pred = face_utils.RealTimePrediction()
+    staff_df = face_utils.retrive_data(name='staff:register')
+    logger.info("Face recognition initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize face recognition: {str(e)}")
+    raise
+
+def get_camera_source():
+    """Smart camera source detection for EC2/local environments"""
+    # Try local camera first
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        logger.info("Using local camera (device 0)")
+        return cap
+    
+    # Fallback to test video (optional - only if file exists)
+    test_video = os.path.join(app.static_folder, 'sample_video.mp4')
+    if os.path.exists(test_video):
+        cap = cv2.VideoCapture(test_video)
+        if cap.isOpened():
+            logger.info(f"Using test video: {test_video}")
+            return cap
+    
+    # Final fallback - no camera available
+    logger.warning("No camera available - using blank frames")
+    return None
 
 def generate_frames():
     """Generate video frames with face recognition."""
-    camera = cv2.VideoCapture(0)
+    camera = get_camera_source()
+    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)  # Black frame as fallback
+    
     while True:
-        success, frame = camera.read()
-        if not success:
-            break
-        else:
-            try:
+        try:
+            if camera:
+                success, frame = camera.read()
+                if not success and hasattr(camera, 'get'):  # If video file
+                    camera.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+                elif not success:  # If camera
+                    break
+            else:
+                frame = blank_frame.copy()
+                success = True
+
+            if success:
+                # Process frame with reduced resolution for EC2
+                frame = cv2.resize(frame, (640, 480))
                 frame = real_time_pred.face_prediction(
                     test_image=frame,
                     dataframe=staff_df,
                     feature_column='Facial_features',
                     thresh=0.5
                 )
-                ret, buffer = cv2.imencode('.jpg', frame)
+                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            except Exception as e:
-                print(f"Error processing frame: {str(e)}")
-                continue
+            else:
+                logger.warning("Frame capture failed")
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + cv2.imencode('.jpg', blank_frame)[1].tobytes() + b'\r\n')
+
+        except Exception as e:
+            logger.error(f"Frame processing error: {str(e)}")
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + cv2.imencode('.jpg', blank_frame)[1].tobytes() + b'\r\n')
+            continue
 
 def verify_location(browser_lat, browser_lon):
     """Verify if coordinates are within any allowed location"""
@@ -64,7 +115,8 @@ def verify_location(browser_lat, browser_lon):
             
             if distance <= loc_data['radius_km']:
                 return True, f"Verified in {loc_name} ({(distance*1000):.0f}m from center)"
-        except KeyError:
+        except KeyError as e:
+            logger.warning(f"Invalid location data for {loc_name}: {str(e)}")
             continue
     
     return False, "Location not in any allowed area"
@@ -101,7 +153,18 @@ def index():
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    try:
+        return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    except Exception as e:
+        logger.error(f"Video feed error: {str(e)}")
+        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        return Response(
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' + 
+            cv2.imencode('.jpg', blank_frame)[1].tobytes() + 
+            b'\r\n',
+            mimetype='multipart/x-mixed-replace; boundary=frame'
+        )
 
 @app.route('/reload_locations', methods=['POST'])
 def reload_locations():
@@ -272,8 +335,6 @@ def get_location():
         latitude = float(data['lat'])
         longitude = float(data['lon'])
 
-        # Here you would typically call a geocoding service
-        # For now, we'll just return the coordinates
         return jsonify({
             'status': 'success',
             'location': {
@@ -297,4 +358,9 @@ def get_location():
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=os.getenv('DEBUG', 'False') == 'True')
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=os.getenv('DEBUG', 'False') == 'True',
+        threaded=True
+    )
