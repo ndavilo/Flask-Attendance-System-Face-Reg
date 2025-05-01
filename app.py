@@ -1,14 +1,27 @@
 import os
-from flask import Flask, render_template, Response, request, redirect, url_for, jsonify, send_from_directory
+import json
+from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 import cv2
 import face_utils
 from datetime import datetime
 from dotenv import load_dotenv
+from geopy.distance import geodesic
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = os.getenv('SECRET_KEY', 'default-secret-key')
+
+# Load allowed locations from JSON file
+def load_locations():
+    try:
+        with open('allowedLocations.json', 'r') as f:
+            data = json.load(f)
+            return data.get('locations', {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+ALLOWED_LOCATIONS = load_locations()
 
 # Initialize face recognition
 real_time_pred = face_utils.RealTimePrediction()
@@ -37,6 +50,46 @@ def generate_frames():
                 print(f"Error processing frame: {str(e)}")
                 continue
 
+def verify_location(browser_lat, browser_lon):
+    """Verify if coordinates are within any allowed location"""
+    if not ALLOWED_LOCATIONS:
+        return False, "No allowed locations configured"
+    
+    for loc_name, loc_data in ALLOWED_LOCATIONS.items():
+        try:
+            distance = geodesic(
+                (browser_lat, browser_lon),
+                (loc_data['lat'], loc_data['lon'])
+            ).km
+            
+            if distance <= loc_data['radius_km']:
+                return True, f"Verified in {loc_name} ({(distance*1000):.0f}m from center)"
+        except KeyError:
+            continue
+    
+    return False, "Location not in any allowed area"
+
+def get_nearest_location_name(lat, lon):
+    """Get the name of the nearest allowed location"""
+    if not ALLOWED_LOCATIONS:
+        return "Unknown location"
+    
+    nearest = None
+    min_distance = float('inf')
+    
+    for loc_name, loc_data in ALLOWED_LOCATIONS.items():
+        try:
+            distance = geodesic((lat, lon), (loc_data['lat'], loc_data['lon'])).km
+            if distance < min_distance:
+                min_distance = distance
+                nearest = loc_name
+        except KeyError:
+            continue
+    
+    if nearest:
+        return f"Near {nearest} ({(min_distance*1000):.0f}m)"
+    return "Unknown location"
+
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static', 'images'),
@@ -50,20 +103,34 @@ def index():
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/reload_locations', methods=['POST'])
+def reload_locations():
+    """Endpoint to reload locations from file"""
+    global ALLOWED_LOCATIONS
+    ALLOWED_LOCATIONS = load_locations()
+    return jsonify({
+        'status': 'success',
+        'message': f'Reloaded {len(ALLOWED_LOCATIONS)} locations'
+    })
+
 @app.route('/clock_in', methods=['POST'])
 def clock_in():
-    """Handle clock-in requests with location data."""
+    """Location-verified clock-in endpoint"""
     try:
-        latitude = request.form.get('latitude')
-        longitude = request.form.get('longitude')
+        # Get and validate coordinates
+        latitude = float(request.form.get('latitude'))
+        longitude = float(request.form.get('longitude'))
         
-        if not latitude or not longitude:
+        # Verify location
+        is_valid, reason = verify_location(latitude, longitude)
+        if not is_valid:
             return jsonify({
                 'status': 'error',
-                'message': 'Clock In failed',
-                'reason': 'Location data missing'
-            }), 400
+                'message': 'Clock In blocked',
+                'reason': reason
+            }), 403
 
+        # Existing face verification logic
         logs = real_time_pred.logs
         if not logs.get('name'):
             return jsonify({
@@ -77,20 +144,20 @@ def clock_in():
             return jsonify({
                 'status': 'error',
                 'message': 'Clock In failed',
-                'reason': 'Unknown user - Face not recognized'
+                'reason': 'Unknown user'
             }), 401
 
         if not real_time_pred.check_last_action(name, 'Clock_In'):
             return jsonify({
                 'status': 'error',
                 'message': 'Clock In failed',
-                'reason': f'{name} already clocked in today without clocking out first'
+                'reason': f'{name} already clocked in'
             }), 409
 
-        # Add location to all entries
+        # Save location data
         logs['latitude'] = [latitude] * len(logs['name'])
         logs['longitude'] = [longitude] * len(logs['name'])
-
+        
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_In')
         
         return jsonify({
@@ -102,11 +169,18 @@ def clock_in():
                 'location': {
                     'latitude': latitude,
                     'longitude': longitude,
-                    'address': currentLocation.address if 'currentLocation' in globals() else 'Location not resolved'
-                }
+                    'address': get_nearest_location_name(latitude, longitude)
+                },
+                'verification': reason
             }
         })
 
+    except ValueError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid coordinates',
+            'reason': 'Provide valid latitude/longitude'
+        }), 400
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -118,15 +192,17 @@ def clock_in():
 def clock_out():
     """Handle clock-out requests with location data."""
     try:
-        latitude = request.form.get('latitude')
-        longitude = request.form.get('longitude')
+        latitude = float(request.form.get('latitude'))
+        longitude = float(request.form.get('longitude'))
         
-        if not latitude or not longitude:
+        # Verify location
+        is_valid, reason = verify_location(latitude, longitude)
+        if not is_valid:
             return jsonify({
                 'status': 'error',
-                'message': 'Clock Out failed',
-                'reason': 'Location data missing'
-            }), 400
+                'message': 'Clock Out blocked',
+                'reason': reason
+            }), 403
 
         logs = real_time_pred.logs
         if not logs.get('name'):
@@ -141,7 +217,7 @@ def clock_out():
             return jsonify({
                 'status': 'error',
                 'message': 'Clock Out failed',
-                'reason': 'Unknown user - Face not recognized'
+                'reason': 'Unknown user'
             }), 401
 
         if not real_time_pred.check_last_action(name, 'Clock_Out'):
@@ -151,10 +227,10 @@ def clock_out():
                 'reason': f'{name} must clock in first before clocking out'
             }), 409
 
-        # Add location to all entries
+        # Save location data
         logs['latitude'] = [latitude] * len(logs['name'])
         logs['longitude'] = [longitude] * len(logs['name'])
-
+        
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_Out')
         
         return jsonify({
@@ -166,11 +242,18 @@ def clock_out():
                 'location': {
                     'latitude': latitude,
                     'longitude': longitude,
-                    'address': currentLocation.address if 'currentLocation' in globals() else 'Location not resolved'
-                }
+                    'address': get_nearest_location_name(latitude, longitude)
+                },
+                'verification': reason
             }
         })
 
+    except ValueError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid coordinates',
+            'reason': 'Provide valid latitude/longitude'
+        }), 400
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -214,4 +297,4 @@ def get_location():
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.getenv('DEBUG', 'False') == 'True')
