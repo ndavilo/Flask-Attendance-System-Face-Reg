@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EFCC StaffSuite</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='images/EFCC1.png') }}" type="image/png">
+</head>
+<body>
+    <!-- Left Column - Header -->
+    <div class="header-column">
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='images/EFCC1.png') }}" width="150" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+        </div>
+        <div>
+            <p class="header-title">ECONOMIC AND FINANCIAL CRIMES COMMISSION</p>
+            <p class="header-subtitle">Department of Information and Communication Technology</p>
+            <p class="header-subtitle">Lagos Zonal Directorate 2 [Okotie-Eboh Office]</p>
+        </div>
+        <div>
+            <h2 class="app-title">EFCC StaffSuite</h2>
+            <p class="app-slogan">Efficient Workforce Tracking at Your Fingertips</p>
+        </div>
+        
+        <!-- Location Display -->
+        <div class="location-info">
+            <h3>Current Location</h3>
+            <div id="locationResult" class="location-details">
+                <p>Fetching location...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column - Content -->
+    <div class="content-column">
+        <div class="container">
+            <h1>Face Recognition Attendance System</h1>
+            
+            <div id="statusMessages"></div>
+
+            <div class="video-container">
+                <img src="{{ url_for('video_feed') }}" width="640" height="480">
+            </div>
+            <div class="controls">
+                <button type="button" onclick="submitWithLocation('{{ url_for('clock_in') }}')">Clock In</button>
+                <button type="button" onclick="submitWithLocation('{{ url_for('clock_out') }}')">Clock Out</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variable to store location
+        let currentLocation = null;
+    
+        document.addEventListener('DOMContentLoaded', () => {
+            const locationResult = document.getElementById('locationResult');
+            
+            if (!navigator.geolocation) {
+                locationResult.innerHTML = '<p>Geolocation not supported by your browser</p>';
+                return;
+            }
+    
+            locationResult.innerHTML = '<p>Detecting location...</p>';
+            
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+
+                    try {
+                        const response = await fetch('/get_location', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lat, lon })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.status === 'success') {
+                            currentLocation = data.location; // Store location globally
+                            locationResult.innerHTML = `
+                                <p><strong>Latitude:</strong> ${data.location.latitude.toFixed(6)}</p>
+                                <p><strong>Longitude:</strong> ${data.location.longitude.toFixed(6)}</p>
+                                <p><strong>Address:</strong> ${data.location.address}</p>
+                            `;
+                        } else {
+                            locationResult.innerHTML = `<p>${data.error || 'Location error'}</p>`;
+                            showAlert('error', 'Location detection failed: ' + (data.reason || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        locationResult.innerHTML = '<p>Failed to get location details</p>';
+                        showAlert('error', 'Location service error: ' + error.message);
+                    }
+                },
+                (error) => {
+                    let message = "Location unavailable: ";
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            message += "Permission denied";
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            message += "Position unavailable";
+                            break;
+                        case error.TIMEOUT:
+                            message += "Request timed out";
+                            break;
+                        default:
+                            message += "Unknown error";
+                    }
+                    locationResult.innerHTML = `<p>${message}</p>`;
+                    showAlert('error', message);
+                },
+                { 
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        });
+    
+        // Function to send location with clock in/out
+        async function submitWithLocation(actionUrl) {
+            if (!currentLocation) {
+                showAlert('error', 'Please wait for location detection to complete');
+                return;
+            }
+
+            try {
+                const response = await fetch(actionUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        latitude: currentLocation.latitude,
+                        longitude: currentLocation.longitude
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.reason || 'Unknown error occurred');
+                }
+
+                if (data.status === 'success') {
+                    showAlert('success', `${data.message} - ${data.data.name} at ${data.data.time}`);
+                } else {
+                    showAlert('error', `${data.message}: ${data.reason}`);
+                }
+            } catch (error) {
+                showAlert('error', `Request failed: ${error.message}`);
+            }
+        }
+
+        // Helper function to show alerts
+        function showAlert(type, message) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `status-message status-${type}`;
+            alertDiv.textContent = message;
+            
+            // Remove existing alerts
+            const statusContainer = document.getElementById('statusMessages');
+            statusContainer.innerHTML = '';
+            
+            // Insert new alert
+            statusContainer.appendChild(alertDiv);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

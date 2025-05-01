@@ -1,0 +1,10 @@
+face_attendance/
+├── app.py
+├── face_utils.py
+├── templates/
+│   └── index.html 
+├── static/
+│   └── style.css
+    └── images/EFCC1.png
+├── .env
+└── requirements.txt

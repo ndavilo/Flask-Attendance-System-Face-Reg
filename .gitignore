@@ -1,0 +1,10 @@
+__pycache__/
+
+# Virtual environment
+flaskenv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*

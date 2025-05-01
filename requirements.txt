@@ -1,0 +1,10 @@
+flask
+opencv-python
+numpy
+pandas
+redis
+insightface
+scikit-learn
+python-dotenv
+onnxruntime
+geopy
