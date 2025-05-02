@@ -1,6 +1,7 @@
 face_attendance/
 ├── app.py
 ├── face_utils.py
+├── allowedLocations.json
 ├── templates/
 │   └── index.html 
 ├── static/

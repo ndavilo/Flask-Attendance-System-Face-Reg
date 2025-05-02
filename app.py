@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import numpy as np
 from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 import cv2
@@ -30,7 +31,7 @@ def load_locations():
 
 ALLOWED_LOCATIONS = load_locations()
 
-# Initialize face recognition with reduced memory footprint
+# Initialize face recognition
 try:
     real_time_pred = face_utils.RealTimePrediction()
     staff_df = face_utils.retrive_data(name='staff:register')
@@ -38,68 +39,6 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize face recognition: {str(e)}")
     raise
-
-def get_camera_source():
-    """Smart camera source detection for EC2/local environments"""
-    # Try local camera first
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        logger.info("Using local camera (device 0)")
-        return cap
-    
-    # Fallback to test video (optional - only if file exists)
-    test_video = os.path.join(app.static_folder, 'sample_video.mp4')
-    if os.path.exists(test_video):
-        cap = cv2.VideoCapture(test_video)
-        if cap.isOpened():
-            logger.info(f"Using test video: {test_video}")
-            return cap
-    
-    # Final fallback - no camera available
-    logger.warning("No camera available - using blank frames")
-    return None
-
-def generate_frames():
-    """Generate video frames with face recognition."""
-    camera = get_camera_source()
-    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)  # Black frame as fallback
-    
-    while True:
-        try:
-            if camera:
-                success, frame = camera.read()
-                if not success and hasattr(camera, 'get'):  # If video file
-                    camera.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    continue
-                elif not success:  # If camera
-                    break
-            else:
-                frame = blank_frame.copy()
-                success = True
-
-            if success:
-                # Process frame with reduced resolution for EC2
-                frame = cv2.resize(frame, (640, 480))
-                frame = real_time_pred.face_prediction(
-                    test_image=frame,
-                    dataframe=staff_df,
-                    feature_column='Facial_features',
-                    thresh=0.5
-                )
-                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                frame = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            else:
-                logger.warning("Frame capture failed")
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + cv2.imencode('.jpg', blank_frame)[1].tobytes() + b'\r\n')
-
-        except Exception as e:
-            logger.error(f"Frame processing error: {str(e)}")
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + cv2.imencode('.jpg', blank_frame)[1].tobytes() + b'\r\n')
-            continue
 
 def verify_location(browser_lat, browser_lon):
     """Verify if coordinates are within any allowed location"""
@@ -153,22 +92,18 @@ def index():
 
 @app.route('/video_feed')
 def video_feed():
-    try:
-        return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-    except Exception as e:
-        logger.error(f"Video feed error: {str(e)}")
-        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        return Response(
-            b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n' + 
-            cv2.imencode('.jpg', blank_frame)[1].tobytes() + 
-            b'\r\n',
-            mimetype='multipart/x-mixed-replace; boundary=frame'
-        )
+    """Placeholder endpoint for compatibility"""
+    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    _, buffer = cv2.imencode('.jpg', blank_frame)
+    return Response(
+        b'--frame\r\n'
+        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n',
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 @app.route('/reload_locations', methods=['POST'])
 def reload_locations():
-    """Endpoint to reload locations from file"""
+    """Reload locations from file"""
     global ALLOWED_LOCATIONS
     ALLOWED_LOCATIONS = load_locations()
     return jsonify({
@@ -178,12 +113,32 @@ def reload_locations():
 
 @app.route('/clock_in', methods=['POST'])
 def clock_in():
-    """Location-verified clock-in endpoint"""
+    """Handle clock-in with browser-captured image"""
     try:
-        # Get and validate coordinates
-        latitude = float(request.form.get('latitude'))
-        longitude = float(request.form.get('longitude'))
-        
+        data = request.json
+        latitude = float(data.get('latitude'))
+        longitude = float(data.get('longitude'))
+        image_data = data.get('image')
+
+        if not image_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No image provided',
+                'reason': 'Camera frame missing'
+            }), 400
+
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        image_np = np.frombuffer(image_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid image data',
+                'reason': 'Failed to decode image'
+            }), 400
+
         # Verify location
         is_valid, reason = verify_location(latitude, longitude)
         if not is_valid:
@@ -193,7 +148,14 @@ def clock_in():
                 'reason': reason
             }), 403
 
-        # Existing face verification logic
+        # Process face recognition
+        frame = real_time_pred.face_prediction(
+            test_image=frame,
+            dataframe=staff_df,
+            feature_column='Facial_features',
+            thresh=0.5
+        )
+
         logs = real_time_pred.logs
         if not logs.get('name'):
             return jsonify({
@@ -217,10 +179,9 @@ def clock_in():
                 'reason': f'{name} already clocked in'
             }), 409
 
-        # Save location data
+        # Save logs with location
         logs['latitude'] = [latitude] * len(logs['name'])
         logs['longitude'] = [longitude] * len(logs['name'])
-        
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_In')
         
         return jsonify({
@@ -233,16 +194,15 @@ def clock_in():
                     'latitude': latitude,
                     'longitude': longitude,
                     'address': get_nearest_location_name(latitude, longitude)
-                },
-                'verification': reason
+                }
             }
         })
 
-    except ValueError:
+    except ValueError as e:
         return jsonify({
             'status': 'error',
             'message': 'Invalid coordinates',
-            'reason': 'Provide valid latitude/longitude'
+            'reason': str(e)
         }), 400
     except Exception as e:
         return jsonify({
@@ -253,11 +213,32 @@ def clock_in():
 
 @app.route('/clock_out', methods=['POST'])
 def clock_out():
-    """Handle clock-out requests with location data."""
+    """Handle clock-out with browser-captured image"""
     try:
-        latitude = float(request.form.get('latitude'))
-        longitude = float(request.form.get('longitude'))
-        
+        data = request.json
+        latitude = float(data.get('latitude'))
+        longitude = float(data.get('longitude'))
+        image_data = data.get('image')
+
+        if not image_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No image provided',
+                'reason': 'Camera frame missing'
+            }), 400
+
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        image_np = np.frombuffer(image_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid image data',
+                'reason': 'Failed to decode image'
+            }), 400
+
         # Verify location
         is_valid, reason = verify_location(latitude, longitude)
         if not is_valid:
@@ -266,6 +247,14 @@ def clock_out():
                 'message': 'Clock Out blocked',
                 'reason': reason
             }), 403
+
+        # Process face recognition
+        frame = real_time_pred.face_prediction(
+            test_image=frame,
+            dataframe=staff_df,
+            feature_column='Facial_features',
+            thresh=0.5
+        )
 
         logs = real_time_pred.logs
         if not logs.get('name'):
@@ -287,13 +276,12 @@ def clock_out():
             return jsonify({
                 'status': 'error',
                 'message': 'Clock Out failed',
-                'reason': f'{name} must clock in first before clocking out'
+                'reason': f'{name} must clock in first'
             }), 409
 
-        # Save location data
+        # Save logs with location
         logs['latitude'] = [latitude] * len(logs['name'])
         logs['longitude'] = [longitude] * len(logs['name'])
-        
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_Out')
         
         return jsonify({
@@ -306,16 +294,15 @@ def clock_out():
                     'latitude': latitude,
                     'longitude': longitude,
                     'address': get_nearest_location_name(latitude, longitude)
-                },
-                'verification': reason
+                }
             }
         })
 
-    except ValueError:
+    except ValueError as e:
         return jsonify({
             'status': 'error',
             'message': 'Invalid coordinates',
-            'reason': 'Provide valid latitude/longitude'
+            'reason': str(e)
         }), 400
     except Exception as e:
         return jsonify({
@@ -326,21 +313,18 @@ def clock_out():
 
 @app.route('/get_location', methods=['POST'])
 def get_location():
-    """Handle location resolution from coordinates."""
+    """Resolve coordinates to location"""
     try:
         data = request.json
-        if not data or 'lat' not in data or 'lon' not in data:
-            return jsonify({'error': 'Invalid location data'}), 400
-
-        latitude = float(data['lat'])
-        longitude = float(data['lon'])
+        latitude = float(data.get('lat'))
+        longitude = float(data.get('lon'))
 
         return jsonify({
             'status': 'success',
             'location': {
                 'latitude': latitude,
                 'longitude': longitude,
-                'address': f"Approximate location: {latitude:.6f}, {longitude:.6f}"
+                'address': get_nearest_location_name(latitude, longitude)
             }
         })
 
@@ -348,7 +332,7 @@ def get_location():
         return jsonify({
             'status': 'error',
             'message': 'Invalid coordinates',
-            'reason': 'Latitude and longitude must be valid numbers'
+            'reason': 'Latitude and longitude must be numbers'
         }), 400
     except Exception as e:
         return jsonify({

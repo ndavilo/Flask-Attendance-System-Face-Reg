@@ -10,18 +10,19 @@
 <body>
     <!-- Left Column - Header -->
     <div class="header-column">
-            <div class="logo-container">
-                <img src="{{ url_for('static', filename='images/EFCC1.png') }}" width="150" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
-            </div>
-            <div>
-                <p class="header-title">ECONOMIC AND FINANCIAL CRIMES COMMISSION</p>
-                <p class="header-subtitle">Department of Information and Communication Technology</p>
-                <p class="header-subtitle">Lagos Zonal Directorate 2 [Okotie-Eboh Office]</p>
-            </div>
-            <div>
-                <h2 class="app-title">EFCC StaffSuite</h2>
-                <p class="app-slogan">Efficient Workforce Tracking at Your Fingertips</p>
-            </div>
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='images/EFCC1.png') }}" width="150" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+        </div>
+        <div>
+            <p class="header-title">ECONOMIC AND FINANCIAL CRIMES COMMISSION</p>
+            <p class="header-subtitle">Department of Information and Communication Technology</p>
+            <p class="header-subtitle">Lagos Zonal Directorate 2 [Okotie-Eboh Office]</p>
+        </div>
+        <div>
+            <h2 class="app-title">EFCC StaffSuite</h2>
+            <p class="app-slogan">Efficient Workforce Tracking at Your Fingertips</p>
+        </div>
+        
         <!-- Location Display -->
         <div class="location-info">
             <h3>Current Location</h3>
@@ -40,9 +41,11 @@
             <div id="statusMessages"></div>
 
             <div class="video-container">
-                <img src="{{ url_for('video_feed') }}" width="640" height="480" id="videoFeed">
+                <video id="videoElement" width="640" height="480" autoplay playsinline></video>
+                <canvas id="canvasElement" width="640" height="480" style="display:none;"></canvas>
                 <div id="cameraStatus" class="status-message"></div>
             </div>
+            
             <div class="controls">
                 <button type="button" onclick="submitWithLocation('{{ url_for('clock_in') }}')" id="clockInBtn" disabled>Clock In</button>
                 <button type="button" onclick="submitWithLocation('{{ url_for('clock_out') }}')" id="clockOutBtn" disabled>Clock Out</button>
@@ -66,29 +69,41 @@
         let cameraActive = false;
         
         // DOM elements
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('canvasElement');
+        const ctx = canvasElement.getContext('2d');
         const locationResult = document.getElementById('locationResult');
         const locationStatus = document.getElementById('locationStatus');
-        const videoFeed = document.getElementById('videoFeed');
         const cameraStatus = document.getElementById('cameraStatus');
         const clockInBtn = document.getElementById('clockInBtn');
         const clockOutBtn = document.getElementById('clockOutBtn');
 
-        // Check camera status
-        videoFeed.onload = () => {
-            cameraActive = true;
-            cameraStatus.textContent = 'Camera active';
-            cameraStatus.className = 'status-message status-success';
-            updateButtonStates();
-        };
-        
-        videoFeed.onerror = () => {
-            cameraActive = false;
-            cameraStatus.textContent = 'Camera not available';
-            cameraStatus.className = 'status-message status-error';
-            updateButtonStates();
-        };
+        // Start camera stream
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 }, 
+                    audio: false 
+                });
+                videoElement.srcObject = stream;
+                cameraStatus.textContent = 'Camera active';
+                cameraStatus.className = 'status-message status-success';
+                cameraActive = true;
+                updateButtonStates();
+            } catch (err) {
+                console.error("Camera error:", err);
+                cameraStatus.textContent = 'Camera access denied';
+                cameraStatus.className = 'status-message status-error';
+                cameraActive = false;
+                updateButtonStates();
+                showAlert('error', 'Camera access denied - please enable permissions');
+            }
+        }
 
+        // Initialize on page load
         document.addEventListener('DOMContentLoaded', () => {
+            startCamera();
+            
             if (!navigator.geolocation) {
                 locationResult.innerHTML = '<p>Geolocation not supported by your browser</p>';
                 locationStatus.innerHTML = '<p class="status-error">Location services unavailable</p>';
@@ -113,8 +128,7 @@
 
                 const { latitude: lat, longitude: lon, accuracy } = position.coords;
                 
-                // Check location accuracy
-                if (accuracy > 100) { // More than 100m accuracy
+                if (accuracy > 100) {
                     locationStatus.innerHTML = '<p class="status-error">Location too inaccurate (disable VPN or move outdoors)</p>';
                     locationVerified = false;
                     updateButtonStates();
@@ -189,15 +203,18 @@
                 return;
             }
 
+            // Capture frame from video
+            ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            const imageData = canvasElement.toDataURL('image/jpeg', 0.7).split(',')[1];
+
             try {
                 const response = await fetch(actionUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         latitude: currentLocation.latitude,
-                        longitude: currentLocation.longitude
+                        longitude: currentLocation.longitude,
+                        image: imageData
                     })
                 });
 
@@ -209,7 +226,6 @@
 
                 if (data.status === 'success') {
                     showAlert('success', `${data.message} - ${data.data.name} at ${data.data.time}`);
-                    // Refresh location after successful action
                     setTimeout(fetchLocation, 2000);
                 } else {
                     showAlert('error', `${data.message}: ${data.reason}`);

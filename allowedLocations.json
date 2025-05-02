@@ -1,8 +1,8 @@
 {
     "locations": {
         "Main Office": {
-            "lat": 6.5244,
-            "lon": 3.3792,
+            "lat": 6.447688,
+            "lon": 3.420964,
             "radius_km": 0.5
         },
         "Branch Office": {
