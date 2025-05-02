@@ -330,18 +330,25 @@ class RealTimePrediction:
             FaceRecognitionError: If face detection fails
         """
         try:
+            # Reset logs at the start of each prediction
+            self.reset_dict()
+            
             current_time = str(datetime.now())
             results = faceapp.get(test_image)
             test_copy = test_image.copy()
             
-            for res in results:
+            # Only process the most prominent face (largest bounding box)
+            if results:
+                # Find the face with largest area
+                res = max(results, key=lambda r: (r['bbox'][2]-r['bbox'][0])*(r['bbox'][3]-r['bbox'][1]))
+                
                 x1, y1, x2, y2 = res['bbox'].astype(int)
                 embeddings = res['embedding']
                 person_name, person_role = ml_search_algorithm(dataframe, 
-                                                              feature_column,
-                                                              test_vector=embeddings,
-                                                              name_role=name_role,
-                                                              thresh=thresh)
+                                                            feature_column,
+                                                            test_vector=embeddings,
+                                                            name_role=name_role,
+                                                            thresh=thresh)
                 
                 if person_name == 'Unknown':
                     color = (0, 0, 255)  # Red for unknown

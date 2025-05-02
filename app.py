@@ -115,6 +115,9 @@ def reload_locations():
 def clock_in():
     """Handle clock-in with browser-captured image"""
     try:
+        # Reset face recognition state at the start
+        real_time_pred.reset_dict()
+        
         data = request.json
         latitude = float(data.get('latitude'))
         longitude = float(data.get('longitude'))
@@ -148,7 +151,7 @@ def clock_in():
                 'reason': reason
             }), 403
 
-        # Process face recognition
+        # Process face recognition (only processes most prominent face)
         frame = real_time_pred.face_prediction(
             test_image=frame,
             dataframe=staff_df,
@@ -165,6 +168,8 @@ def clock_in():
             }), 400
 
         name = logs['name'][0]
+        role = logs['role'][0]
+        
         if name == 'Unknown':
             return jsonify({
                 'status': 'error',
@@ -172,6 +177,7 @@ def clock_in():
                 'reason': 'Unknown user'
             }), 401
 
+        # Check last action validity
         if not real_time_pred.check_last_action(name, 'Clock_In'):
             return jsonify({
                 'status': 'error',
@@ -184,11 +190,15 @@ def clock_in():
         logs['longitude'] = [longitude] * len(logs['name'])
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_In')
         
+        # Reset after successful operation
+        real_time_pred.reset_dict()
+        
         return jsonify({
             'status': 'success',
             'message': 'Clock In successful',
             'data': {
                 'name': name,
+                'role': role,
                 'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'location': {
                     'latitude': latitude,
@@ -199,22 +209,28 @@ def clock_in():
         })
 
     except ValueError as e:
+        real_time_pred.reset_dict()
         return jsonify({
             'status': 'error',
             'message': 'Invalid coordinates',
             'reason': str(e)
         }), 400
     except Exception as e:
+        real_time_pred.reset_dict()
+        logger.error(f"Clock In error: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': 'Clock In failed',
-            'reason': str(e)
+            'reason': 'Internal server error'
         }), 500
 
 @app.route('/clock_out', methods=['POST'])
 def clock_out():
     """Handle clock-out with browser-captured image"""
     try:
+        # Reset face recognition state at the start
+        real_time_pred.reset_dict()
+        
         data = request.json
         latitude = float(data.get('latitude'))
         longitude = float(data.get('longitude'))
@@ -248,7 +264,7 @@ def clock_out():
                 'reason': reason
             }), 403
 
-        # Process face recognition
+        # Process face recognition (only processes most prominent face)
         frame = real_time_pred.face_prediction(
             test_image=frame,
             dataframe=staff_df,
@@ -265,6 +281,8 @@ def clock_out():
             }), 400
 
         name = logs['name'][0]
+        role = logs['role'][0]
+        
         if name == 'Unknown':
             return jsonify({
                 'status': 'error',
@@ -272,6 +290,7 @@ def clock_out():
                 'reason': 'Unknown user'
             }), 401
 
+        # Check last action validity
         if not real_time_pred.check_last_action(name, 'Clock_Out'):
             return jsonify({
                 'status': 'error',
@@ -284,11 +303,15 @@ def clock_out():
         logs['longitude'] = [longitude] * len(logs['name'])
         real_time_pred.saveLogs_redis(Clock_In_Out='Clock_Out')
         
+        # Reset after successful operation
+        real_time_pred.reset_dict()
+        
         return jsonify({
             'status': 'success',
             'message': 'Clock Out successful',
             'data': {
                 'name': name,
+                'role': role,
                 'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'location': {
                     'latitude': latitude,
@@ -299,18 +322,21 @@ def clock_out():
         })
 
     except ValueError as e:
+        real_time_pred.reset_dict()
         return jsonify({
             'status': 'error',
             'message': 'Invalid coordinates',
             'reason': str(e)
         }), 400
     except Exception as e:
+        real_time_pred.reset_dict()
+        logger.error(f"Clock Out error: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': 'Clock Out failed',
-            'reason': str(e)
+            'reason': 'Internal server error'
         }), 500
-
+    
 @app.route('/get_location', methods=['POST'])
 def get_location():
     """Resolve coordinates to location"""
