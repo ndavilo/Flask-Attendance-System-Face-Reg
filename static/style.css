@@ -6,6 +6,7 @@
     --accent-color: #B70803;
     --button-color: #320001;
     --border-color: #e0e0e0;
+    --header-width: 280px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,102 +21,116 @@
     }
 }
 
+* {
+    box-sizing: border-box;
+}
+
 body {
     font-family: 'Segoe UI', Arial, sans-serif;
     margin: 0;
     padding: 0;
     background-color: var(--primary-bg);
     color: var(--primary-text);
-    display: grid;
-    grid-template-columns: 300px 1fr;
+    display: flex;
+    flex-direction: column;
     min-height: 100vh;
+    overflow-x: hidden;
 }
 
 /* Header Column */
 .header-column {
     background-color: var(--secondary-bg);
     color: white;
-    padding: 20px;
+    padding: 15px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-    position: sticky;
-    top: 0;
-    height: 100vh;
+    width: 100%;
+    order: 1;
 }
 
 .logo-container {
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     text-align: center;
 }
 
 .header-title {
     font-size: 16px;
     font-weight: bold;
-    margin: 10px 0;
+    margin: 8px 0;
     text-align: center;
 }
 
 .header-subtitle {
     font-size: 12px;
-    margin: 5px 0;
+    margin: 4px 0;
     text-align: center;
     opacity: 0.9;
 }
 
 .app-title {
     color: white;
-    margin: 20px 0 5px 0;
-    font-size: 1.3rem;
+    margin: 15px 0 5px 0;
+    font-size: 1.2rem;
     text-align: center;
 }
 
 .app-slogan {
     font-style: italic;
     color: rgba(255,255,255,0.8);
-    margin: 0 0 20px 0;
+    margin: 0 0 15px 0;
     font-size: 0.8rem;
     text-align: center;
 }
 
 /* Content Column */
 .content-column {
-    padding: 20px;
-    max-width: 900px;
-    margin: 0 auto;
+    padding: 15px;
     width: 100%;
+    order: 2;
+    flex: 1;
 }
 
 .container {
     background: rgba(255, 255, 255, 0.95);
     border-radius: 8px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
+    padding: 15px;
+    margin-bottom: 15px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 h1 {
     color: var(--accent-color);
-    font-size: 1.5rem;
-    margin: 0 0 15px 0;
+    font-size: 1.3rem;
+    margin: 0 0 12px 0;
     text-align: center;
 }
 
 h2 {
-    font-size: 1.2rem;
-    margin: 15px 0 10px 0;
+    font-size: 1.1rem;
+    margin: 12px 0 8px 0;
     color: var(--primary-text);
 }
 
 .video-container {
     text-align: center;
-    margin: 15px 0;
+    margin: 12px 0;
+    width: 100%;
+    position: relative;
+    padding-top: 75%; /* 4:3 aspect ratio */
 }
 
-.video-container img {
-    max-width: 100%;
-    height: auto;
+.video-container video,
+.video-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
     border-radius: 4px;
     border: 1px solid var(--border-color);
 }
@@ -123,12 +138,13 @@ h2 {
 .controls {
     display: flex;
     justify-content: center;
-    gap: 15px;
-    margin: 20px 0;
+    gap: 10px;
+    margin: 15px 0;
+    flex-wrap: wrap;
 }
 
 button {
-    padding: 10px 20px;
+    padding: 12px 20px;
     background-color: var(--button-color);
     color: white;
     border: none;
@@ -137,6 +153,8 @@ button {
     font-size: 14px;
     transition: all 0.3s ease;
     min-width: 120px;
+    flex: 1;
+    max-width: 200px;
 }
 
 button:hover {
@@ -145,8 +163,8 @@ button:hover {
 }
 
 #result {
-    margin-top: 15px;
-    padding: 15px;
+    margin-top: 12px;
+    padding: 12px;
     border: 1px solid var(--border-color);
     background-color: #fff;
     border-radius: 6px;
@@ -158,7 +176,7 @@ button:hover {
 }
 
 hr {
-    margin: 20px 0;
+    margin: 15px 0;
     border: 0;
     height: 1px;
     background-color: var(--border-color);
@@ -166,8 +184,8 @@ hr {
 
 .status-message {
     text-align: center;
-    margin: 15px 0;
-    padding: 15px;
+    margin: 12px 0;
+    padding: 12px;
     border-radius: 4px;
     font-weight: bold;
 }
@@ -186,8 +204,8 @@ hr {
 
 /* Location Info */
 .location-info {
-    margin-top: auto; /* Pushes to bottom of header column */
-    padding: 15px;
+    margin-top: auto;
+    padding: 12px;
     background: rgba(0,0,0,0.1);
     border-radius: 6px;
     width: 100%;
@@ -195,8 +213,8 @@ hr {
 }
 
 .location-info h3 {
-    margin: 0 0 10px 0;
-    font-size: 1rem;
+    margin: 0 0 8px 0;
+    font-size: 0.9rem;
     color: white;
 }
 
@@ -204,29 +222,62 @@ hr {
     font-size: 0.8rem;
     color: rgba(255,255,255,0.9);
     text-align: left;
-    margin-top: 10px;
-    padding: 10px;
+    margin-top: 8px;
+    padding: 8px;
     background-color: rgba(0,0,0,0.2);
     border-radius: 4px;
 }
 
 .location-details p {
-    margin: 5px 0;
+    margin: 4px 0;
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
+.location-requirements {
+    font-size: 0.9rem;
+    margin-top: 15px;
+}
+
+.location-requirements ul {
+    padding-left: 20px;
+    margin: 8px 0;
+}
+
+/* Tablet and larger screens */
+@media (min-width: 768px) {
     body {
-        grid-template-columns: 1fr;
+        flex-direction: row;
     }
     
     .header-column {
-        height: auto;
-        position: relative;
-        padding: 15px;
+        width: var(--header-width);
+        height: 100vh;
+        position: sticky;
+        top: 0;
+        padding: 20px;
     }
     
     .content-column {
-        padding: 15px;
+        padding: 20px;
+        flex: 1;
+        max-width: calc(100% - var(--header-width));
+    }
+    
+    .video-container {
+        padding-top: 56.25%; /* 16:9 aspect ratio for larger screens */
+    }
+    
+    h1 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Large desktop screens */
+@media (min-width: 1200px) {
+    :root {
+        --header-width: 300px;
+    }
+    
+    .container {
+        padding: 25px;
     }
 }

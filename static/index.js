@@ -13,8 +13,34 @@ const clockOutBtn = document.getElementById('clockOutBtn');
 
 async function startCamera() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+        const constraints = {
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "user"
+            }, 
+            audio: false
+        };
+        
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoElement.srcObject = stream;
+        
+        // Adjust video element size based on container
+        const resizeVideo = () => {
+            const container = videoElement.parentElement;
+            const aspectRatio = 4/3; // Default to 4:3
+            
+            if (container.clientWidth > 0) {
+                videoElement.width = container.clientWidth;
+                videoElement.height = container.clientWidth / aspectRatio;
+                canvasElement.width = container.clientWidth;
+                canvasElement.height = container.clientWidth / aspectRatio;
+            }
+        };
+        
+        resizeVideo();
+        window.addEventListener('resize', resizeVideo);
+        
         cameraStatus.textContent = 'Camera active';
         cameraStatus.className = 'status-message status-success';
         cameraActive = true;

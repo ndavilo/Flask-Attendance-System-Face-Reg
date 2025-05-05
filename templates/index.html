@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Staff Attendance System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="icon" href="{{ url_for('static', filename='images/logo.png') }}" type="image/png">
+    <link rel="icon" href="{{ url_for('static', filename='images/EFCC1.png') }}" type="image/png">
 </head>
 <body>
     <!-- Left Column - Header -->
@@ -41,8 +41,8 @@
             <div id="statusMessages"></div>
 
             <div class="video-container">
-                <video id="videoElement" width="640" height="480" autoplay playsinline></video>
-                <canvas id="canvasElement" width="640" height="480" style="display:none;"></canvas>
+                <video id="videoElement" autoplay playsinline></video>
+                <canvas id="canvasElement" style="display:none;"></canvas>
                 <div id="cameraStatus" class="status-message"></div>
             </div>
             
